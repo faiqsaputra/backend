@@ -1,0 +1,862 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                 String              @id @db.Uuid
+  name               String?
+  email              String              @unique
+  avatarUrl          String?
+  role               UserRole            @default(USER)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  lastLoginAt        DateTime?
+  status             UserStatus          @default(ACTIVE)
+  suspendedAt        DateTime?
+  auditLogs          AuditLog[]
+  createdCategories  ContentCategory[]   @relation("CategoryCreator")
+  reviewEntries      ContentReview[]     @relation("ReviewReviewer")
+  createdTags        ContentTag[]        @relation("TagCreator")
+  updatedFlags       FeatureFlag[]       @relation("FeatureFlagUpdater")
+  ingestionJobs      IngestionJob[]      @relation("IngestionJobCreator")
+  knowledgeDocuments KnowledgeDocument[] @relation("KnowledgeDocumentCreator")
+  materialProgress   MaterialProgress[]
+  answeredQuestions  MaterialQuestion[]  @relation("MaterialQuestionAnswerer")
+  materialQuestions  MaterialQuestion[]  @relation("MaterialQuestionUser")
+  materialRevisions  MaterialRevision[]  @relation("MaterialRevisionCreator")
+  authoredMaterials  Material[]          @relation("MaterialAuthor")
+  publishedMaterials Material[]          @relation("MaterialPublisher")
+  updatedMaterials   Material[]          @relation("MaterialEditor")
+  mediaAssets        MediaAsset[]
+  quizAttempts       QuizAttempt[]
+  quizRevisions      QuizRevision[]      @relation("QuizRevisionCreator")
+  authoredQuizzes    Quiz[]              @relation("QuizAuthor")
+  publishedQuizzes   Quiz[]              @relation("QuizPublisher")
+  updatedQuizzes     Quiz[]              @relation("QuizEditor")
+  createdSettings    SystemSetting[]     @relation("SettingUpdater")
+  videoProgress      VideoProgress[]
+  videoRevisions     VideoRevision[]     @relation("VideoRevisionCreator")
+  authoredVideos     Video[]             @relation("VideoAuthor")
+  publishedVideos    Video[]             @relation("VideoPublisher")
+  updatedVideos      Video[]             @relation("VideoEditor")
+
+  @@index([role])
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model ContentCategory {
+  id          String             @id @default(cuid())
+  name        String
+  slug        String             @unique
+  description String?
+  order       Int                @default(0)
+  createdById String?            @db.Uuid
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  createdBy   User?              @relation("CategoryCreator", fields: [createdById], references: [id])
+  materials   MaterialCategory[]
+  videos      VideoCategory[]
+
+  @@index([order])
+  @@map("content_categories")
+}
+
+model ContentTag {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  createdById String?       @db.Uuid
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  createdBy   User?         @relation("TagCreator", fields: [createdById], references: [id])
+  materials   MaterialTag[]
+  videos      VideoTag[]
+
+  @@index([name])
+  @@map("content_tags")
+}
+
+model Material {
+  id              String             @id @default(cuid())
+  title           String
+  slug            String             @unique
+  description     String?
+  content         String
+  coverImage      String?
+  order           Int                @default(0)
+  status          ContentStatus      @default(DRAFT)
+  quizRequired    Boolean            @default(true)
+  publishedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  authorId        String?            @db.Uuid
+  contentVersion  Int                @default(1)
+  excerpt         String?
+  isFeatured      Boolean            @default(false)
+  publishedById   String?            @db.Uuid
+  readTimeMinutes Int?
+  scheduledAt     DateTime?
+  seoDescription  String?
+  seoTitle        String?
+  updatedById     String?            @db.Uuid
+  categories      MaterialCategory[]
+  progress        MaterialProgress[]
+  questions       MaterialQuestion[]
+  revisions       MaterialRevision[]
+  tags            MaterialTag[]
+  author          User?              @relation("MaterialAuthor", fields: [authorId], references: [id])
+  publishedBy     User?              @relation("MaterialPublisher", fields: [publishedById], references: [id])
+  updatedBy       User?              @relation("MaterialEditor", fields: [updatedById], references: [id])
+  quiz            Quiz?
+
+  @@index([status])
+  @@index([order])
+  @@index([status, order])
+  @@index([status, scheduledAt])
+  @@index([authorId])
+  @@index([publishedAt])
+  @@index([isFeatured])
+  @@map("materials")
+}
+
+model MaterialQuestion {
+  id           String         @id @default(cuid())
+  materialId   String
+  userId       String         @db.Uuid
+  question     String
+  answer       String?
+  status       QuestionStatus @default(PENDING)
+  answeredById String?        @db.Uuid
+  answeredAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  answeredBy   User?          @relation("MaterialQuestionAnswerer", fields: [answeredById], references: [id])
+  material     Material       @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user         User           @relation("MaterialQuestionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([materialId, status])
+  @@index([userId])
+  @@index([answeredById])
+  @@index([createdAt])
+  @@map("material_questions")
+}
+
+model MaterialCategory {
+  materialId String
+  categoryId String
+  category   ContentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  material   Material        @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@id([materialId, categoryId])
+  @@index([categoryId])
+  @@map("material_categories")
+}
+
+model MaterialTag {
+  materialId String
+  tagId      String
+  material   Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  tag        ContentTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([materialId, tagId])
+  @@index([tagId])
+  @@map("material_tags")
+}
+
+model MaterialRevision {
+  id          String          @id @default(cuid())
+  materialId  String
+  version     Int
+  title       String
+  description String?
+  excerpt     String?
+  content     String
+  coverImage  String?
+  status      RevisionStatus  @default(DRAFT)
+  changeNote  String?
+  createdById String          @db.Uuid
+  createdAt   DateTime        @default(now())
+  reviews     ContentReview[]
+  createdBy   User            @relation("MaterialRevisionCreator", fields: [createdById], references: [id])
+  material    Material        @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, version])
+  @@index([materialId])
+  @@index([materialId, status])
+  @@index([createdById])
+  @@map("material_revisions")
+}
+
+model Video {
+  id              String             @id @default(cuid())
+  title           String
+  slug            String             @unique
+  description     String?
+  provider        VideoProvider      @default(YOUTUBE)
+  externalId      String?
+  url             String
+  thumbnailUrl    String?
+  durationSeconds Int?
+  order           Int                @default(0)
+  status          ContentStatus      @default(DRAFT)
+  isFeatured      Boolean            @default(false)
+  contentVersion  Int                @default(1)
+  seoTitle        String?
+  seoDescription  String?
+  authorId        String?            @db.Uuid
+  updatedById     String?            @db.Uuid
+  publishedById   String?            @db.Uuid
+  scheduledAt     DateTime?
+  publishedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  categories      VideoCategory[]
+  chapters        VideoChapter[]
+  interactions    VideoInteraction[]
+  progress        VideoProgress[]
+  resources       VideoResource[]
+  revisions       VideoRevision[]
+  tags            VideoTag[]
+  transcript      VideoTranscript?
+  author          User?              @relation("VideoAuthor", fields: [authorId], references: [id])
+  publishedBy     User?              @relation("VideoPublisher", fields: [publishedById], references: [id])
+  updatedBy       User?              @relation("VideoEditor", fields: [updatedById], references: [id])
+
+  @@index([status])
+  @@index([order])
+  @@index([status, order])
+  @@index([status, scheduledAt])
+  @@index([provider, externalId])
+  @@index([authorId])
+  @@index([publishedById])
+  @@index([publishedAt])
+  @@index([isFeatured])
+  @@map("videos")
+}
+
+model VideoTranscript {
+  id        String   @id @default(cuid())
+  videoId   String   @unique
+  language  String   @default("id")
+  content   String
+  source    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([language])
+  @@map("video_transcripts")
+}
+
+model VideoCategory {
+  videoId    String
+  categoryId String
+  category   ContentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  video      Video           @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@id([videoId, categoryId])
+  @@index([categoryId])
+  @@map("video_categories")
+}
+
+model VideoTag {
+  videoId String
+  tagId   String
+  tag     ContentTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  video   Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@id([videoId, tagId])
+  @@index([tagId])
+  @@map("video_tags")
+}
+
+model VideoRevision {
+  id              String          @id @default(cuid())
+  videoId         String
+  version         Int
+  title           String
+  description     String?
+  url             String
+  thumbnailUrl    String?
+  durationSeconds Int?
+  status          RevisionStatus  @default(DRAFT)
+  changeNote      String?
+  createdById     String          @db.Uuid
+  createdAt       DateTime        @default(now())
+  externalId      String?
+  provider        VideoProvider
+  reviews         ContentReview[]
+  createdBy       User            @relation("VideoRevisionCreator", fields: [createdById], references: [id])
+  video           Video           @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, version])
+  @@index([videoId])
+  @@index([videoId, status])
+  @@index([createdById])
+  @@map("video_revisions")
+}
+
+model VideoChapter {
+  id           String   @id @default(cuid())
+  videoId      String
+  title        String
+  description  String?
+  startSeconds Int
+  endSeconds   Int?
+  order        Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  video        Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, order])
+  @@index([videoId, startSeconds])
+  @@map("video_chapters")
+}
+
+model VideoInteraction {
+  id               String                 @id @default(cuid())
+  videoId          String
+  type             VideoInteractionType
+  title            String
+  description      String?
+  timestampSeconds Int
+  durationSeconds  Int?
+  action           VideoInteractionAction @default(PAUSE)
+  required         Boolean                @default(false)
+  active           Boolean                @default(true)
+  order            Int                    @default(0)
+  payload          Json?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  video            Video                  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, timestampSeconds])
+  @@index([videoId, active])
+  @@index([videoId, type])
+  @@map("video_interactions")
+}
+
+model VideoResource {
+  id               String   @id @default(cuid())
+  videoId          String
+  title            String
+  description      String?
+  url              String
+  type             String
+  timestampSeconds Int?
+  order            Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  video            Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, order])
+  @@index([videoId, timestampSeconds])
+  @@map("video_resources")
+}
+
+model Quiz {
+  id               String         @id @default(cuid())
+  materialId       String         @unique
+  title            String
+  description      String?
+  passingScore     Int            @default(80)
+  xpPerCorrect     Int            @default(100)
+  order            Int            @default(0)
+  status           ContentStatus  @default(DRAFT)
+  publishedAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  authorId         String?        @db.Uuid
+  contentVersion   Int            @default(1)
+  maxAttempts      Int?
+  publishedById    String?        @db.Uuid
+  scheduledAt      DateTime?
+  showExplanation  Boolean        @default(true)
+  shuffleQuestions Boolean        @default(false)
+  timeLimitSeconds Int?
+  updatedById      String?        @db.Uuid
+  questions        Question[]
+  attempts         QuizAttempt[]
+  revisions        QuizRevision[]
+  author           User?          @relation("QuizAuthor", fields: [authorId], references: [id])
+  material         Material       @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  publishedBy      User?          @relation("QuizPublisher", fields: [publishedById], references: [id])
+  updatedBy        User?          @relation("QuizEditor", fields: [updatedById], references: [id])
+
+  @@index([status])
+  @@index([order])
+  @@index([status, order])
+  @@index([authorId])
+  @@map("quizzes")
+}
+
+model QuizRevision {
+  id           String          @id @default(cuid())
+  quizId       String
+  version      Int
+  title        String
+  description  String?
+  passingScore Int
+  xpPerCorrect Int
+  status       RevisionStatus  @default(DRAFT)
+  changeNote   String?
+  createdById  String          @db.Uuid
+  createdAt    DateTime        @default(now())
+  reviews      ContentReview[]
+  createdBy    User            @relation("QuizRevisionCreator", fields: [createdById], references: [id])
+  quiz         Quiz            @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@unique([quizId, version])
+  @@index([quizId])
+  @@index([quizId, status])
+  @@map("quiz_revisions")
+}
+
+model Question {
+  id          String           @id @default(cuid())
+  quizId      String
+  type        QuestionType
+  title       String?
+  question    String
+  content     Json?
+  answer      Json
+  explanation String?
+  points      Int              @default(1)
+  order       Int              @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  options     QuestionOption[]
+  quiz        Quiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers     QuizAnswer[]
+
+  @@index([quizId, order])
+  @@index([quizId, type])
+  @@map("questions")
+}
+
+model QuestionOption {
+  id         String   @id @default(cuid())
+  questionId String
+  label      String
+  value      String
+  isCorrect  Boolean  @default(false)
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId, order])
+  @@map("question_options")
+}
+
+model QuizAttempt {
+  id          String       @id @default(cuid())
+  userId      String       @db.Uuid
+  quizId      String
+  score       Int          @default(0)
+  percentage  Int          @default(0)
+  passed      Boolean      @default(false)
+  startedAt   DateTime     @default(now())
+  completedAt DateTime?
+  answers     QuizAnswer[]
+  quiz        Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, quizId])
+  @@index([quizId])
+  @@index([userId, startedAt])
+  @@map("quiz_attempts")
+}
+
+model QuizAnswer {
+  id            String      @id @default(cuid())
+  attemptId     String
+  questionId    String
+  answer        Json
+  correct       Boolean     @default(false)
+  pointsAwarded Int         @default(0)
+  createdAt     DateTime    @default(now())
+  attempt       QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question      Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([questionId])
+  @@map("quiz_answers")
+}
+
+model MaterialProgress {
+  id          String    @id @default(cuid())
+  userId      String    @db.Uuid
+  materialId  String
+  unlocked    Boolean   @default(false)
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  material    Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, materialId])
+  @@index([userId])
+  @@index([materialId])
+  @@index([completed])
+  @@map("material_progress")
+}
+
+model VideoProgress {
+  id           String    @id @default(cuid())
+  userId       String    @db.Uuid
+  videoId      String
+  watched      Boolean   @default(false)
+  progress     Int       @default(0)
+  lastPosition Int       @default(0)
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video        Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@index([userId])
+  @@index([videoId])
+  @@index([watched])
+  @@map("video_progress")
+}
+
+model MediaAsset {
+  id           String    @id @default(cuid())
+  type         MediaType
+  bucket       String
+  storagePath  String    @unique
+  filename     String
+  mimeType     String?
+  sizeBytes    Int?
+  width        Int?
+  height       Int?
+  altText      String?
+  metadata     Json?
+  uploadedById String    @db.Uuid
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  uploadedBy   User      @relation(fields: [uploadedById], references: [id])
+
+  @@index([type])
+  @@index([uploadedById])
+  @@index([createdAt])
+  @@map("media_assets")
+}
+
+model ContentReview {
+  id                 String            @id @default(cuid())
+  materialRevisionId String?
+  videoRevisionId    String?
+  quizRevisionId     String?
+  reviewerId         String            @db.Uuid
+  decision           ReviewDecision
+  comment            String?
+  createdAt          DateTime          @default(now())
+  materialRevision   MaterialRevision? @relation(fields: [materialRevisionId], references: [id], onDelete: Cascade)
+  quizRevision       QuizRevision?     @relation(fields: [quizRevisionId], references: [id], onDelete: Cascade)
+  reviewer           User              @relation("ReviewReviewer", fields: [reviewerId], references: [id])
+  videoRevision      VideoRevision?    @relation(fields: [videoRevisionId], references: [id], onDelete: Cascade)
+
+  @@index([materialRevisionId])
+  @@index([videoRevisionId])
+  @@index([quizRevisionId])
+  @@index([reviewerId])
+  @@index([createdAt])
+  @@map("content_reviews")
+}
+
+model KnowledgeCollection {
+  id          String              @id @default(cuid())
+  name        String
+  slug        String              @unique
+  description String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  documents   KnowledgeDocument[]
+
+  @@index([name])
+  @@map("knowledge_collections")
+}
+
+model KnowledgeDocument {
+  id           String                  @id @default(cuid())
+  collectionId String
+  title        String
+  description  String?
+  sourceType   String
+  sourceUrl    String?
+  storagePath  String?
+  mimeType     String?
+  checksum     String?
+  language     String                  @default("id")
+  version      Int                     @default(1)
+  status       KnowledgeDocumentStatus @default(DRAFT)
+  createdById  String                  @db.Uuid
+  indexedAt    DateTime?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  jobs         IngestionJob[]
+  chunks       KnowledgeChunk[]
+  collection   KnowledgeCollection     @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  createdBy    User                    @relation("KnowledgeDocumentCreator", fields: [createdById], references: [id])
+
+  @@index([collectionId])
+  @@index([status])
+  @@index([checksum])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id              String            @id @default(cuid())
+  documentId      String
+  chunkIndex      Int
+  content         String
+  tokenCount      Int?
+  embeddingStatus EmbeddingStatus   @default(PENDING)
+  embeddingModel  String?
+  vectorKey       String?
+  metadata        Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  document        KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+  @@index([embeddingStatus])
+  @@index([vectorKey])
+  @@map("knowledge_chunks")
+}
+
+model IngestionJob {
+  id          String             @id @default(cuid())
+  documentId  String
+  type        IngestionJobType
+  status      IngestionJobStatus @default(QUEUED)
+  attempts    Int                @default(0)
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdById String?            @db.Uuid
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  createdBy   User?              @relation("IngestionJobCreator", fields: [createdById], references: [id])
+  document    KnowledgeDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([status])
+  @@index([type, status])
+  @@index([createdAt])
+  @@map("ingestion_jobs")
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?     @db.Uuid
+  action     AuditAction
+  entity     String
+  entityId   String?
+  requestId  String?
+  ipHash     String?
+  userAgent  String?
+  beforeData Json?
+  afterData  Json?
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+  actor      User?       @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([requestId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  description String?
+  isPublic    Boolean  @default(false)
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedBy   User?    @relation("SettingUpdater", fields: [updatedById], references: [id])
+
+  @@index([isPublic])
+  @@map("system_settings")
+}
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  enabled     Boolean  @default(false)
+  description String?
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedBy   User?    @relation("FeatureFlagUpdater", fields: [updatedById], references: [id])
+
+  @@index([enabled])
+  @@map("feature_flags")
+}
+
+model Cycle {
+  id        String    @id @default(cuid())
+  userId    String
+  type CycleRecordType @default(HAID)
+  startDate DateTime
+  endDate   DateTime?
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([userId, startDate])
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  EDITOR
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+}
+
+enum ContentStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+enum RevisionStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+enum ReviewDecision {
+  APPROVED
+  REJECTED
+  REQUEST_CHANGES
+}
+
+enum QuestionType {
+  CHOICE
+  TRUE_FALSE
+  ORDERING
+  MATCHING
+  CASE
+}
+
+enum VideoProvider {
+  YOUTUBE
+  VIMEO
+  OTHER
+}
+
+enum VideoInteractionType {
+  REFLECTION
+  QUIZ
+  POLL
+  INFO
+  SOURCE
+  CASE
+  RECAP
+}
+
+enum VideoInteractionAction {
+  CONTINUE
+  PAUSE
+  OPEN
+  SEEK
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+  OTHER
+}
+
+enum KnowledgeDocumentStatus {
+  DRAFT
+  PROCESSING
+  INDEXED
+  FAILED
+  ARCHIVED
+}
+
+enum EmbeddingStatus {
+  PENDING
+  PROCESSING
+  INDEXED
+  FAILED
+}
+
+enum IngestionJobType {
+  INGEST
+  REINDEX
+  DELETE_INDEX
+  UPDATE_EMBEDDING
+}
+
+enum IngestionJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  ARCHIVE
+  RESTORE
+  PUBLISH
+  UNPUBLISH
+  SUBMIT_REVIEW
+  APPROVE
+  REJECT
+  REQUEST_CHANGES
+  LOGIN
+  LOGOUT
+  ROLE_CHANGED
+  STATUS_CHANGED
+  UPLOAD
+  DELETE_MEDIA
+  INDEX
+  REINDEX
+  SETTINGS_UPDATE
+}
+
+enum QuestionStatus {
+  PENDING
+  ANSWERED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum CycleRecordType {
+  HAID
+  NIFAS
+  ISTIHADHAH
+}
