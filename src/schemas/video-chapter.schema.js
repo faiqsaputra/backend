@@ -1,15 +1,55 @@
 import { z } from 'zod';
 
+const startSecondsSchema = z.preprocess(
+  value => value === '' || value === null ? undefined : value,
+  z.coerce.number({
+    error: 'Waktu mulai wajib diisi dengan angka.'
+  }).int('Waktu mulai harus berupa bilangan bulat.').min(
+    0,
+    'Waktu mulai tidak boleh negatif.'
+  )
+);
+
+const endSecondsSchema = z.preprocess(
+  value => value === '' ? null : value,
+  z.coerce.number({
+    error: 'Waktu selesai harus berupa angka.'
+  }).int('Waktu selesai harus berupa bilangan bulat.').min(
+    1,
+    'Waktu selesai minimal 1 detik.'
+  ).nullable().optional()
+);
+
 const videoChapterFields = {
-  title: z.string().trim().min(1, 'Judul chapter wajib diisi.').max(150),
-  description: z.string().trim().max(500).optional().nullable(),
-  startSeconds: z.coerce.number().int().min(0),
-  endSeconds: z.coerce.number().int().min(1).optional().nullable(),
-  order: z.coerce.number().int().min(0).default(0)
+  title: z.string()
+    .trim()
+    .min(1, 'Judul chapter wajib diisi.')
+    .max(150, 'Judul chapter maksimal 150 karakter.'),
+
+  description: z.string()
+    .trim()
+    .max(500, 'Deskripsi maksimal 500 karakter.')
+    .nullable()
+    .optional(),
+
+  startSeconds: startSecondsSchema,
+
+  endSeconds: endSecondsSchema,
+
+  order: z.coerce.number()
+    .int('Urutan harus berupa bilangan bulat.')
+    .min(0, 'Urutan tidak boleh negatif.')
+    .default(0)
 };
 
 const validateChapterTime = (data, ctx) => {
-  if (data.endSeconds !== null && data.endSeconds !== undefined && data.endSeconds <= data.startSeconds) {
+  if (
+    data.startSeconds !== undefined &&
+    data.startSeconds !== null &&
+    data.endSeconds !== undefined &&
+    data.endSeconds !== null &&
+    data.endSeconds <= data.startSeconds
+  ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['endSeconds'],
@@ -28,6 +68,6 @@ export const updateVideoChapterSchema = z
   .superRefine(validateChapterTime);
 
 export const chapterIdSchema = z.object({
-  videoId: z.string().min(1),
-  chapterId: z.string().min(1)
+  videoId: z.string().trim().min(1, 'Video ID wajib diisi.'),
+  chapterId: z.string().trim().min(1, 'Chapter ID wajib diisi.')
 });
