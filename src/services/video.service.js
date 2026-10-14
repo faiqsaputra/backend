@@ -5,6 +5,34 @@ import {
   normalizeYouTubeUrl
 } from '../utils/youtube.js';
 
+function parseYouTubeUrl(value) {
+  let externalId = null;
+
+  try {
+    externalId = extractYouTubeId(value);
+  } catch {
+    externalId = null;
+  }
+
+  if (
+    typeof externalId !== 'string' ||
+    !/^[A-Za-z0-9_-]{11}$/.test(externalId)
+  ) {
+    const error = new Error(
+      'URL YouTube tidak valid. Periksa kembali tautan video.'
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    provider: 'YOUTUBE',
+    externalId,
+    url: normalizeYouTubeUrl(externalId),
+    thumbnailUrl: getYouTubeThumbnail(externalId)
+  };
+}
+
 const adminListSelect = {
   id: true,
   title: true,
@@ -151,11 +179,20 @@ function getRevisionStatus(status) {
 
 function getPublishedAt(status, currentStatus, currentPublishedAt) {
   if (status !== 'PUBLISHED') return null;
-  if (currentStatus === 'PUBLISHED' && currentPublishedAt) return undefined;
+
+  if (currentStatus === 'PUBLISHED' && currentPublishedAt) {
+    return undefined;
+  }
+
   return new Date();
 }
 
-export async function listAdminVideos({ page, limit, search, status }) {
+export async function listAdminVideos({
+  page,
+  limit,
+  search,
+  status
+}) {
   const where = {};
 
   if (status) {
@@ -220,13 +257,14 @@ export async function getAdminVideoById(id) {
 }
 
 export async function getVideoStats() {
-  const [total, draft, review, published, archived] = await Promise.all([
-    prisma.video.count(),
-    prisma.video.count({ where: { status: 'DRAFT' } }),
-    prisma.video.count({ where: { status: 'REVIEW' } }),
-    prisma.video.count({ where: { status: 'PUBLISHED' } }),
-    prisma.video.count({ where: { status: 'ARCHIVED' } })
-  ]);
+  const [total, draft, review, published, archived] =
+    await Promise.all([
+      prisma.video.count(),
+      prisma.video.count({ where: { status: 'DRAFT' } }),
+      prisma.video.count({ where: { status: 'REVIEW' } }),
+      prisma.video.count({ where: { status: 'PUBLISHED' } }),
+      prisma.video.count({ where: { status: 'ARCHIVED' } })
+    ]);
 
   return {
     total,
@@ -248,7 +286,7 @@ export async function createVideo(data, actorId) {
 
   const publishedAt = shouldPublishNow ? new Date() : null;
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async tx => {
     const video = await tx.video.create({
       data: {
         title: data.title,
@@ -346,6 +384,7 @@ export async function updateVideo(id, data, actorId) {
 
   const nextVersion = current.contentVersion + 1;
   const nextStatus = data.status ?? current.status;
+
   const nextScheduledAt = data.scheduledAt !== undefined
     ? data.scheduledAt || null
     : current.scheduledAt;
@@ -368,7 +407,7 @@ export async function updateVideo(id, data, actorId) {
       : new Date()
     : null;
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async tx => {
     const video = await tx.video.update({
       where: { id },
       data: {
@@ -400,9 +439,7 @@ export async function updateVideo(id, data, actorId) {
         scheduledAt: nextScheduledAt,
         contentVersion: nextVersion,
         updatedById: actorId,
-        publishedById: shouldPublishNow
-          ? actorId
-          : null,
+        publishedById: shouldPublishNow ? actorId : null,
         ...(publishedAt !== undefined ? { publishedAt } : {})
       },
       select: adminDetailSelect
@@ -471,7 +508,7 @@ export async function updateVideoStatus(id, status, actorId) {
     ? current.publishedAt || new Date()
     : null;
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async tx => {
     const video = await tx.video.update({
       where: { id },
       data: {
@@ -526,7 +563,7 @@ export async function archiveVideo(id, actorId) {
 
   if (!video) return null;
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async tx => {
     const archived = await tx.video.update({
       where: { id },
       data: {
@@ -702,7 +739,12 @@ export async function deleteResource(id) {
   });
 }
 
-export async function listPublishedVideos({ page, limit, search, category }) {
+export async function listPublishedVideos({
+  page,
+  limit,
+  search,
+  category
+}) {
   const where = getPublishedCondition();
 
   if (search) {
@@ -818,9 +860,7 @@ export async function saveVideoProgress(userId, slug, data) {
       watched,
       progress,
       lastPosition,
-      completedAt: watched
-        ? new Date()
-        : undefined
+      completedAt: watched ? new Date() : undefined
     }
   });
 }
