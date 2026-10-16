@@ -25,6 +25,12 @@ import {
   getPublishedQuiz
 } from '../controllers/public-quiz.controller.js';
 
+import {
+  startQuizAttempt,
+  submitQuizAnswer,
+  completeQuizAttempt
+} from '../controllers/quiz-attempt.controller.js';
+
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
@@ -56,6 +62,10 @@ router.post('/:quizId/archive', archiveQuizHandler);
 // Public quiz routes
 publicQuizRouter.get('/', publicListQuizzes);
 publicQuizRouter.get('/:quizId', getPublishedQuiz);
+
+publicQuizRouter.post('/:quizId/attempts', requireAuth, startQuizAttempt);
+publicQuizRouter.post('/attempts/:attemptId/answers', requireAuth, submitQuizAnswer);
+publicQuizRouter.post('/attempts/:attemptId/complete', requireAuth, completeQuizAttempt);
 
 export { publicQuizRouter };
 export default router;
