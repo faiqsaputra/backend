@@ -26,10 +26,10 @@ import {
 } from '../controllers/public-quiz.controller.js';
 
 import {
-  startQuizAttemptController,
-  submitQuizAnswerController,
-  completeQuizAttemptController,
-  getQuizAttemptController
+  startQuizAttempt,
+  submitQuizAnswer,
+  completeQuizAttempt,
+  getQuizAttempt
 } from '../controllers/quiz-attempt.controller.js';
 
 import {
@@ -44,6 +44,7 @@ const publicQuizRouter = Router();
 // ============================================================
 // ADMIN QUIZ ROUTES
 // Prefix: /api/admin/quizzes
+// Semua endpoint admin membutuhkan autentikasi + role ADMIN.
 // ============================================================
 
 router.use(
@@ -52,9 +53,9 @@ router.use(
 );
 
 
-// ------------------------------------------------------------
-// Quiz management
-// ------------------------------------------------------------
+// ============================================================
+// QUIZ MANAGEMENT
+// ============================================================
 
 router.get(
   '/stats',
@@ -87,9 +88,9 @@ router.delete(
 );
 
 
-// ------------------------------------------------------------
-// Question management
-// ------------------------------------------------------------
+// ============================================================
+// QUESTION MANAGEMENT
+// ============================================================
 
 router.get(
   '/:quizId/questions',
@@ -122,9 +123,9 @@ router.delete(
 );
 
 
-// ------------------------------------------------------------
-// Preview
-// ------------------------------------------------------------
+// ============================================================
+// QUIZ PREVIEW
+// ============================================================
 
 router.get(
   '/:quizId/preview',
@@ -132,9 +133,9 @@ router.get(
 );
 
 
-// ------------------------------------------------------------
-// Publishing
-// ------------------------------------------------------------
+// ============================================================
+// QUIZ PUBLISHING
+// ============================================================
 
 router.post(
   '/:quizId/validate-publish',
@@ -161,15 +162,15 @@ router.post(
 // PUBLIC QUIZ ROUTES
 // Prefix: /api/quizzes
 //
-// GET dapat diakses tanpa login.
-// Endpoint pengerjaan quiz menggunakan requireAuth.
+// GET quiz dapat diakses tanpa login.
+// Endpoint pengerjaan quiz membutuhkan requireAuth.
 // ============================================================
 
 
-// ------------------------------------------------------------
-// Public quiz list
+// ============================================================
+// PUBLIC QUIZ LIST
 // GET /api/quizzes
-// ------------------------------------------------------------
+// ============================================================
 
 publicQuizRouter.get(
   '/',
@@ -177,41 +178,30 @@ publicQuizRouter.get(
 );
 
 
-// ------------------------------------------------------------
-// IMPORTANT:
-//
-// Route /attempts/... harus diletakkan SEBELUM
-// route /:quizId agar struktur routing lebih jelas.
-// ------------------------------------------------------------
+// ============================================================
+// QUIZ ATTEMPT
+// ============================================================
 
 
 // ------------------------------------------------------------
-// Start quiz attempt
-//
+// START ATTEMPT
 // POST /api/quizzes/:quizId/attempts
-//
-// Header:
-// Authorization: Bearer <supabase_access_token>
-//
-// Body:
-// {}
 // ------------------------------------------------------------
 
 publicQuizRouter.post(
   '/:quizId/attempts',
   requireAuth,
-  startQuizAttemptController
+  startQuizAttempt
 );
 
 
 // ------------------------------------------------------------
-// Submit answer
-//
+// SUBMIT ANSWER
 // POST /api/quizzes/attempts/:attemptId/answers
 //
 // Body:
 // {
-//   "questionId": "xxx",
+//   "questionId": "question_id",
 //   "answer": "A"
 // }
 // ------------------------------------------------------------
@@ -219,46 +209,41 @@ publicQuizRouter.post(
 publicQuizRouter.post(
   '/attempts/:attemptId/answers',
   requireAuth,
-  submitQuizAnswerController
+  submitQuizAnswer
 );
 
 
 // ------------------------------------------------------------
-// Complete attempt
-//
+// COMPLETE ATTEMPT
 // POST /api/quizzes/attempts/:attemptId/complete
-//
-// Body:
-// {}
 // ------------------------------------------------------------
 
 publicQuizRouter.post(
   '/attempts/:attemptId/complete',
   requireAuth,
-  completeQuizAttemptController
+  completeQuizAttempt
 );
 
 
 // ------------------------------------------------------------
-// Get attempt result
-//
+// GET ATTEMPT RESULT
 // GET /api/quizzes/attempts/:attemptId
 // ------------------------------------------------------------
 
 publicQuizRouter.get(
   '/attempts/:attemptId',
   requireAuth,
-  getQuizAttemptController
+  getQuizAttempt
 );
 
 
-// ------------------------------------------------------------
-// Published quiz detail
-//
+// ============================================================
+// PUBLISHED QUIZ DETAIL
 // GET /api/quizzes/:quizId
 //
-// Sengaja diletakkan setelah route attempts.
-// ------------------------------------------------------------
+// Route ini diletakkan setelah seluruh route /attempts/*
+// agar struktur endpoint tetap jelas.
+// ============================================================
 
 publicQuizRouter.get(
   '/:quizId',
