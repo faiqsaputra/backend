@@ -1,52 +1,34 @@
 import { prisma } from '../lib/prisma.js';
 
-/**
- * ============================================================
- * HELPERS
- * ============================================================
- */
+
+// ============================================================
+// HELPERS
+// ============================================================
 
 function getUserId(req) {
   return req.auth?.userId || req.user?.id || null;
 }
 
-function getPaginationSafeNumber(value, fallback = 0) {
-  const number = Number(value);
+function getQuizId(req) {
+  return req.params.quizId || null;
+}
 
-  return Number.isFinite(number) ? number : fallback;
+function getAttemptId(req) {
+  return req.params.attemptId || null;
+}
+
+function publishedQuizWhere() {
+  return {
+    status: 'PUBLISHED',
+    OR: [
+      { scheduledAt: null },
+      { scheduledAt: { lte: new Date() } }
+    ]
+  };
 }
 
 function normalizeAnswer(value) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(normalizeAnswer);
-  }
-
-  if (typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        normalizeAnswer(item)
-      ])
-    );
-  }
-
-  return value;
-}
-
-function normalizeComparable(value) {
-  if (value === undefined || value === null) {
+  if (value === null || value === undefined) {
     return null;
   }
 
@@ -54,143 +36,64 @@ function normalizeComparable(value) {
     return value.trim().toLowerCase();
   }
 
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).toLowerCase();
+  }
+
   if (Array.isArray(value)) {
     return value
-      .map(normalizeComparable)
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      .map(item => normalizeAnswer(item))
+      .filter(item => item !== null)
+      .sort();
   }
 
   if (typeof value === 'object') {
-    return Object.keys(value)
-      .sort()
-      .reduce((result, key) => {
-        result[key] = normalizeComparable(value[key]);
-        return result;
-      }, {});
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, normalizeAnswer(item)])
+    );
   }
 
-  return value;
+  return String(value).trim().toLowerCase();
 }
 
-function answersMatch(userAnswer, correctAnswer) {
-  const normalizedUser = normalizeComparable(userAnswer);
-  const normalizedCorrect = normalizeComparable(correctAnswer);
+function answersEqual(userAnswer, correctAnswer) {
+  const normalizedUserAnswer = normalizeAnswer(userAnswer);
+  const normalizedCorrectAnswer = normalizeAnswer(correctAnswer);
 
-  return JSON.stringify(normalizedUser) === JSON.stringify(
-    normalizedCorrect
-  );
+  return JSON.stringify(normalizedUserAnswer) === JSON.stringify(normalizedCorrectAnswer);
 }
 
-function extractCorrectAnswer(question) {
-  /**
-   * Primary source:
-   * Question.answer
-   *
-   * Fallback:
-   * QuestionOption.isCorrect
-   *
-   * Hal ini membuat controller tetap fleksibel terhadap
-   * tipe soal yang berbeda.
-   */
-
-  if (
-    question.answer !== undefined &&
-    question.answer !== null
-  ) {
-    return question.answer;
-  }
-
-  if (Array.isArray(question.options)) {
-    const correctOptions = question.options
-      .filter(option => option.isCorrect)
-      .map(option => option.value);
-
-    if (correctOptions.length === 1) {
-      return correctOptions[0];
-    }
-
-    if (correctOptions.length > 1) {
-      return correctOptions;
-    }
-  }
-
-  return null;
+function isAttemptCompleted(attempt) {
+  return Boolean(attempt.completedAt);
 }
 
-function calculateScore(answers) {
-  return answers.reduce(
-    (total, answer) => total + (answer.pointsAwarded || 0),
-    0
-  );
-}
-
-function calculatePercentage(score, maxScore) {
-  if (!maxScore || maxScore <= 0) {
+function calculatePercentage(score, totalPoints) {
+  if (!totalPoints || totalPoints <= 0) {
     return 0;
   }
 
-  return Math.round((score / maxScore) * 100);
+  return Math.round((score / totalPoints) * 100);
 }
 
-function calculateMaxScore(questions) {
+function getTotalPoints(questions) {
   return questions.reduce(
     (total, question) => total + Math.max(0, question.points || 0),
     0
   );
 }
 
-function sanitizeQuestion(question) {
-  return {
-    id: question.id,
-    type: question.type,
-    title: question.title,
-    question: question.question,
-    content: question.content,
-    points: question.points,
-    order: question.order,
 
-    options: question.options?.map(option => ({
-      id: option.id,
-      label: option.label,
-      value: option.value,
-      order: option.order
-    })) || []
-  };
-}
+// ============================================================
+// START QUIZ ATTEMPT
+// POST /api/quizzes/:quizId/attempts
+// ============================================================
 
-function getAttemptResult(attempt, quiz, questions = []) {
-  const maxScore = calculateMaxScore(questions);
-
-  return {
-    id: attempt.id,
-    quizId: attempt.quizId,
-    score: attempt.score,
-    percentage: attempt.percentage,
-    passed: attempt.passed,
-    startedAt: attempt.startedAt,
-    completedAt: attempt.completedAt,
-    maxScore,
-    passingScore: quiz.passingScore,
-    xpEarned: attempt.answers?.reduce(
-      (total, answer) => total + (
-        answer.correct ? quiz.xpPerCorrect : 0
-      ),
-      0
-    ) || 0
-  };
-}
-
-/**
- * ============================================================
- * START ATTEMPT
- * POST /api/quizzes/:quizId/attempts
- * ============================================================
- */
-
-export async function startQuizAttempt(req, res) {
+export async function startQuizAttemptController(req, res) {
   try {
     const userId = getUserId(req);
-    const { quizId } = req.params;
+    const quizId = getQuizId(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -209,17 +112,7 @@ export async function startQuizAttempt(req, res) {
     const quiz = await prisma.quiz.findFirst({
       where: {
         id: quizId,
-        status: 'PUBLISHED',
-        OR: [
-          {
-            scheduledAt: null
-          },
-          {
-            scheduledAt: {
-              lte: new Date()
-            }
-          }
-        ]
+        ...publishedQuizWhere()
       },
       select: {
         id: true,
@@ -238,13 +131,12 @@ export async function startQuizAttempt(req, res) {
           },
           select: {
             id: true,
-            type: true,
             title: true,
             question: true,
+            type: true,
             content: true,
             points: true,
             order: true,
-            answer: true,
             options: {
               orderBy: {
                 order: 'asc'
@@ -253,8 +145,7 @@ export async function startQuizAttempt(req, res) {
                 id: true,
                 label: true,
                 value: true,
-                order: true,
-                isCorrect: true
+                order: true
               }
             }
           }
@@ -276,16 +167,7 @@ export async function startQuizAttempt(req, res) {
       });
     }
 
-    /**
-     * Cek jumlah attempt yang sudah selesai.
-     *
-     * Attempt yang belum selesai tidak dihitung sebagai
-     * completed attempt.
-     */
-    if (
-      quiz.maxAttempts !== null &&
-      quiz.maxAttempts !== undefined
-    ) {
+    if (quiz.maxAttempts !== null) {
       const completedAttempts = await prisma.quizAttempt.count({
         where: {
           userId,
@@ -297,25 +179,14 @@ export async function startQuizAttempt(req, res) {
       });
 
       if (completedAttempts >= quiz.maxAttempts) {
-        return res.status(409).json({
+        return res.status(403).json({
           success: false,
-          message: `Batas percobaan kuis sudah tercapai (${quiz.maxAttempts} kali).`,
-          data: {
-            maxAttempts: quiz.maxAttempts,
-            attemptsUsed: completedAttempts
-          }
+          message: 'Batas percobaan kuis telah tercapai.'
         });
       }
     }
 
-    /**
-     * Kalau user punya attempt yang belum selesai,
-     * gunakan kembali attempt tersebut.
-     *
-     * Ini mencegah satu user membuat banyak attempt
-     * hanya karena refresh halaman.
-     */
-    let attempt = await prisma.quizAttempt.findFirst({
+    const activeAttempt = await prisma.quizAttempt.findFirst({
       where: {
         userId,
         quizId,
@@ -323,8 +194,297 @@ export async function startQuizAttempt(req, res) {
       },
       orderBy: {
         startedAt: 'desc'
+      }
+    });
+
+    if (activeAttempt) {
+      return res.status(200).json({
+        success: true,
+        message: 'Anda masih memiliki percobaan kuis yang aktif.',
+        data: {
+          attempt: {
+            id: activeAttempt.id,
+            quizId: activeAttempt.quizId,
+            startedAt: activeAttempt.startedAt,
+            completedAt: activeAttempt.completedAt
+          }
+        }
+      });
+    }
+
+    const attempt = await prisma.quizAttempt.create({
+      data: {
+        userId,
+        quizId,
+        score: 0,
+        percentage: 0,
+        passed: false
       },
-      include: {
+      select: {
+        id: true,
+        userId: true,
+        quizId: true,
+        score: true,
+        percentage: true,
+        passed: true,
+        startedAt: true,
+        completedAt: true
+      }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Percobaan kuis berhasil dimulai.',
+      data: {
+        attempt,
+        quiz: {
+          id: quiz.id,
+          materialId: quiz.materialId,
+          title: quiz.title,
+          description: quiz.description,
+          passingScore: quiz.passingScore,
+          xpPerCorrect: quiz.xpPerCorrect,
+          maxAttempts: quiz.maxAttempts,
+          timeLimitSeconds: quiz.timeLimitSeconds,
+          shuffleQuestions: quiz.shuffleQuestions,
+          showExplanation: quiz.showExplanation,
+          questions: quiz.questions
+        }
+      }
+    });
+  } catch (error) {
+    console.error('startQuizAttemptController:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal memulai percobaan kuis.'
+    });
+  }
+}
+
+
+// ============================================================
+// SUBMIT QUIZ ANSWER
+// POST /api/quizzes/attempts/:attemptId/answers
+// ============================================================
+
+export async function submitQuizAnswerController(req, res) {
+  try {
+    const userId = getUserId(req);
+    const attemptId = getAttemptId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required.'
+      });
+    }
+
+    if (!attemptId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Attempt ID wajib diisi.'
+      });
+    }
+
+    const { questionId, answer } = req.body || {};
+
+    if (!questionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Question ID wajib diisi.'
+      });
+    }
+
+    if (answer === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Jawaban wajib diisi.'
+      });
+    }
+
+    const attempt = await prisma.quizAttempt.findFirst({
+      where: {
+        id: attemptId,
+        userId
+      },
+      select: {
+        id: true,
+        userId: true,
+        quizId: true,
+        startedAt: true,
+        completedAt: true,
+        quiz: {
+          select: {
+            id: true,
+            timeLimitSeconds: true
+          }
+        }
+      }
+    });
+
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: 'Percobaan kuis tidak ditemukan.'
+      });
+    }
+
+    if (isAttemptCompleted(attempt)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Percobaan kuis sudah diselesaikan.'
+      });
+    }
+
+    if (
+      attempt.quiz.timeLimitSeconds !== null &&
+      attempt.quiz.timeLimitSeconds > 0
+    ) {
+      const elapsedSeconds = Math.floor(
+        (Date.now() - new Date(attempt.startedAt).getTime()) / 1000
+      );
+
+      if (elapsedSeconds >= attempt.quiz.timeLimitSeconds) {
+        return res.status(400).json({
+          success: false,
+          message: 'Waktu pengerjaan kuis telah habis.'
+        });
+      }
+    }
+
+    const question = await prisma.question.findFirst({
+      where: {
+        id: questionId,
+        quizId: attempt.quizId
+      },
+      select: {
+        id: true,
+        quizId: true,
+        answer: true,
+        points: true
+      }
+    });
+
+    if (!question) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pertanyaan tidak ditemukan pada kuis ini.'
+      });
+    }
+
+    const correct = answersEqual(
+      answer,
+      question.answer
+    );
+
+    const pointsAwarded = correct
+      ? Math.max(0, question.points || 0)
+      : 0;
+
+    const quizAnswer = await prisma.quizAnswer.upsert({
+      where: {
+        attemptId_questionId: {
+          attemptId,
+          questionId
+        }
+      },
+      update: {
+        answer,
+        correct,
+        pointsAwarded
+      },
+      create: {
+        attemptId,
+        questionId,
+        answer,
+        correct,
+        pointsAwarded
+      },
+      select: {
+        id: true,
+        attemptId: true,
+        questionId: true,
+        answer: true,
+        correct: true,
+        pointsAwarded: true,
+        createdAt: true
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Jawaban berhasil disimpan.',
+      data: {
+        answer: {
+          id: quizAnswer.id,
+          attemptId: quizAnswer.attemptId,
+          questionId: quizAnswer.questionId,
+          correct: quizAnswer.correct,
+          pointsAwarded: quizAnswer.pointsAwarded,
+          createdAt: quizAnswer.createdAt
+        }
+      }
+    });
+  } catch (error) {
+    console.error('submitQuizAnswerController:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal menyimpan jawaban kuis.'
+    });
+  }
+}
+
+
+// ============================================================
+// COMPLETE QUIZ ATTEMPT
+// POST /api/quizzes/attempts/:attemptId/complete
+// ============================================================
+
+export async function completeQuizAttemptController(req, res) {
+  try {
+    const userId = getUserId(req);
+    const attemptId = getAttemptId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required.'
+      });
+    }
+
+    if (!attemptId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Attempt ID wajib diisi.'
+      });
+    }
+
+    const attempt = await prisma.quizAttempt.findFirst({
+      where: {
+        id: attemptId,
+        userId
+      },
+      select: {
+        id: true,
+        userId: true,
+        quizId: true,
+        score: true,
+        percentage: true,
+        passed: true,
+        startedAt: true,
+        completedAt: true,
+        quiz: {
+          select: {
+            id: true,
+            title: true,
+            passingScore: true,
+            xpPerCorrect: true,
+            timeLimitSeconds: true,
+            showExplanation: true
+          }
+        },
         answers: {
           select: {
             id: true,
@@ -338,381 +498,127 @@ export async function startQuizAttempt(req, res) {
     });
 
     if (!attempt) {
-      attempt = await prisma.quizAttempt.create({
-        data: {
-          userId,
-          quizId,
-          score: 0,
-          percentage: 0,
-          passed: false
-        },
-        include: {
-          answers: {
-            select: {
-              id: true,
-              questionId: true,
-              answer: true,
-              correct: true,
-              pointsAwarded: true
-            }
-          }
-        }
-      });
-    }
-
-    /**
-     * Jangan kirim Question.answer atau isCorrect
-     * ke browser.
-     */
-    let questions = quiz.questions.map(sanitizeQuestion);
-
-    /**
-     * Shuffle dilakukan berdasarkan konfigurasi quiz.
-     *
-     * Urutan aktual tidak mengubah order database.
-     */
-    if (quiz.shuffleQuestions) {
-      questions = [...questions].sort(
-        () => Math.random() - 0.5
-      );
-    }
-
-    return res.status(201).json({
-      success: true,
-      message: 'Attempt kuis berhasil dimulai.',
-      data: {
-        attempt: {
-          id: attempt.id,
-          quizId: attempt.quizId,
-          startedAt: attempt.startedAt,
-          completedAt: attempt.completedAt,
-          score: attempt.score,
-          percentage: attempt.percentage,
-          passed: attempt.passed
-        },
-
-        quiz: {
-          id: quiz.id,
-          materialId: quiz.materialId,
-          title: quiz.title,
-          description: quiz.description,
-          passingScore: quiz.passingScore,
-          xpPerCorrect: quiz.xpPerCorrect,
-          maxAttempts: quiz.maxAttempts,
-          timeLimitSeconds: quiz.timeLimitSeconds,
-          showExplanation: quiz.showExplanation
-        },
-
-        questions,
-
-        /**
-         * Jawaban yang sudah tersimpan dikirim supaya
-         * frontend dapat melanjutkan attempt setelah refresh.
-         *
-         * Tidak ada correct answer di sini.
-         */
-        answered: attempt.answers.map(answer => ({
-          questionId: answer.questionId,
-          answer: answer.answer
-        }))
-      }
-    });
-  } catch (error) {
-    console.error('startQuizAttempt:', error);
-
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal memulai kuis.'
-    });
-  }
-}
-
-/**
- * ============================================================
- * SUBMIT ANSWER
- * POST /api/quizzes/attempts/:attemptId/answers
- * ============================================================
- */
-
-export async function submitQuizAnswer(req, res) {
-  try {
-    const userId = getUserId(req);
-    const { attemptId } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required.'
-      });
-    }
-
-    if (!attemptId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Attempt ID wajib diisi.'
-      });
-    }
-
-    const questionId =
-      req.body?.questionId ||
-      req.body?.question_id;
-
-    const userAnswer =
-      req.body?.answer ??
-      req.body?.value ??
-      req.body?.selectedAnswer;
-
-    if (!questionId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Question ID wajib diisi.'
-      });
-    }
-
-    if (userAnswer === undefined || userAnswer === null) {
-      return res.status(400).json({
-        success: false,
-        message: 'Jawaban wajib diisi.'
-      });
-    }
-
-    const attempt = await prisma.quizAttempt.findFirst({
-      where: {
-        id: attemptId,
-        userId
-      },
-      include: {
-        quiz: {
-          select: {
-            id: true,
-            title: true,
-            passingScore: true,
-            xpPerCorrect: true,
-            timeLimitSeconds: true,
-            showExplanation: true
-          }
-        }
-      }
-    });
-
-    if (!attempt) {
       return res.status(404).json({
         success: false,
-        message: 'Attempt kuis tidak ditemukan.'
+        message: 'Percobaan kuis tidak ditemukan.'
       });
     }
 
     if (attempt.completedAt) {
-      return res.status(409).json({
-        success: false,
-        message: 'Kuis sudah diselesaikan.'
+      return res.status(200).json({
+        success: true,
+        message: 'Percobaan kuis sudah diselesaikan sebelumnya.',
+        data: {
+          attempt: {
+            id: attempt.id,
+            quizId: attempt.quizId,
+            score: attempt.score,
+            percentage: attempt.percentage,
+            passed: attempt.passed,
+            startedAt: attempt.startedAt,
+            completedAt: attempt.completedAt
+          }
+        }
       });
     }
 
-    /**
-     * Time limit.
-     */
-    if (attempt.quiz.timeLimitSeconds) {
-      const elapsedSeconds = Math.floor(
-        (Date.now() - attempt.startedAt.getTime()) / 1000
-      );
-
-      if (
-        elapsedSeconds >
-        attempt.quiz.timeLimitSeconds
-      ) {
-        return res.status(409).json({
-          success: false,
-          message: 'Waktu pengerjaan kuis telah habis.',
-          data: {
-            timeLimitSeconds: attempt.quiz.timeLimitSeconds,
-            elapsedSeconds
-          }
-        });
-      }
-    }
-
-    const question = await prisma.question.findFirst({
+    const questions = await prisma.question.findMany({
       where: {
-        id: questionId,
         quizId: attempt.quizId
       },
       select: {
         id: true,
-        type: true,
-        question: true,
-        answer: true,
-        points: true,
-        explanation: true,
-        options: {
-          orderBy: {
-            order: 'asc'
-          },
-          select: {
-            id: true,
-            value: true,
-            isCorrect: true
-          }
-        }
-      }
-    });
-
-    if (!question) {
-      return res.status(404).json({
-        success: false,
-        message: 'Pertanyaan tidak ditemukan dalam kuis ini.'
-      });
-    }
-
-    const normalizedAnswer = normalizeAnswer(userAnswer);
-
-    const correctAnswer =
-      extractCorrectAnswer(question);
-
-    const correct =
-      correctAnswer !== null &&
-      answersMatch(
-        normalizedAnswer,
-        correctAnswer
-      );
-
-    const pointsAwarded =
-      correct
-        ? Math.max(0, question.points || 0)
-        : 0;
-
-    /**
-     * Upsert karena schema mempunyai:
-     *
-     * @@unique([attemptId, questionId])
-     */
-    const savedAnswer =
-      await prisma.quizAnswer.upsert({
-        where: {
-          attemptId_questionId: {
-            attemptId,
-            questionId
-          }
-        },
-        create: {
-          attemptId,
-          questionId,
-          answer: normalizedAnswer,
-          correct,
-          pointsAwarded
-        },
-        update: {
-          answer: normalizedAnswer,
-          correct,
-          pointsAwarded
-        },
-        select: {
-          id: true,
-          attemptId: true,
-          questionId: true,
-          answer: true,
-          correct: true,
-          pointsAwarded: true
-        }
-      });
-
-    /**
-     * Hitung ulang score berdasarkan seluruh jawaban.
-     */
-    const allAnswers = await prisma.quizAnswer.findMany({
-      where: {
-        attemptId
-      },
-      select: {
-        pointsAwarded: true
-      }
-    });
-
-    const score = calculateScore(allAnswers);
-
-    const quizQuestions = await prisma.question.findMany({
-      where: {
-        quizId: attempt.quizId
-      },
-      select: {
         points: true
       }
     });
 
-    const maxScore =
-      calculateMaxScore(quizQuestions);
+    const totalPoints = getTotalPoints(questions);
 
-    const percentage =
-      calculatePercentage(score, maxScore);
+    const score = attempt.answers.reduce(
+      (total, item) => total + Math.max(0, item.pointsAwarded || 0),
+      0
+    );
 
-    await prisma.quizAttempt.update({
+    const percentage = calculatePercentage(
+      score,
+      totalPoints
+    );
+
+    const passed = percentage >= attempt.quiz.passingScore;
+
+    const completedAt = new Date();
+
+    const completedAttempt = await prisma.quizAttempt.update({
       where: {
-        id: attemptId
+        id: attempt.id
       },
       data: {
         score,
         percentage,
-        passed: percentage >= attempt.quiz.passingScore
+        passed,
+        completedAt
+      },
+      select: {
+        id: true,
+        userId: true,
+        quizId: true,
+        score: true,
+        percentage: true,
+        passed: true,
+        startedAt: true,
+        completedAt: true
       }
     });
 
+    const correctCount = attempt.answers.filter(
+      answer => answer.correct
+    ).length;
+
+    const answeredCount = attempt.answers.length;
+
+    const totalQuestions = questions.length;
+
+    const xpEarned = correctCount * attempt.quiz.xpPerCorrect;
+
     return res.status(200).json({
       success: true,
-      message: 'Jawaban berhasil disimpan.',
+      message: passed
+        ? 'Selamat! Kuis berhasil diselesaikan.'
+        : 'Kuis selesai. Tetap semangat untuk belajar lagi.',
       data: {
-        answer: {
-          id: savedAnswer.id,
-          attemptId: savedAnswer.attemptId,
-          questionId: savedAnswer.questionId,
-          answer: savedAnswer.answer
-        },
-
-        /**
-         * Boleh memberi tahu benar/salah setelah jawaban
-         * disimpan. Ini berguna untuk mode belajar adaptif.
-         */
-        evaluation: {
-          correct,
-          pointsAwarded
-        },
-
-        progress: {
-          answered: allAnswers.length,
-          total: quizQuestions.length,
+        attempt: completedAttempt,
+        result: {
           score,
-          maxScore,
-          percentage
+          percentage,
+          passed,
+          correctCount,
+          answeredCount,
+          totalQuestions,
+          totalPoints,
+          xpEarned
         }
       }
     });
   } catch (error) {
-    console.error('submitQuizAnswer:', error);
-
-    if (error?.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Attempt atau jawaban tidak ditemukan.'
-      });
-    }
+    console.error('completeQuizAttemptController:', error);
 
     return res.status(500).json({
       success: false,
-      message: 'Gagal menyimpan jawaban.'
+      message: 'Gagal menyelesaikan percobaan kuis.'
     });
   }
 }
 
-/**
- * ============================================================
- * COMPLETE ATTEMPT
- * POST /api/quizzes/attempts/:attemptId/complete
- * ============================================================
- */
 
-export async function completeQuizAttempt(req, res) {
+// ============================================================
+// GET QUIZ ATTEMPT
+// GET /api/quizzes/attempts/:attemptId
+// ============================================================
+
+export async function getQuizAttemptController(req, res) {
   try {
     const userId = getUserId(req);
-    const { attemptId } = req.params;
+    const attemptId = getAttemptId(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -733,26 +639,60 @@ export async function completeQuizAttempt(req, res) {
         id: attemptId,
         userId
       },
-      include: {
+      select: {
+        id: true,
+        userId: true,
+        quizId: true,
+        score: true,
+        percentage: true,
+        passed: true,
+        startedAt: true,
+        completedAt: true,
         quiz: {
           select: {
             id: true,
             title: true,
+            description: true,
             passingScore: true,
             xpPerCorrect: true,
-            maxAttempts: true,
             timeLimitSeconds: true,
             showExplanation: true
           }
         },
         answers: {
+          orderBy: {
+            createdAt: 'asc'
+          },
           select: {
             id: true,
             questionId: true,
             answer: true,
             correct: true,
             pointsAwarded: true,
-            createdAt: true
+            createdAt: true,
+            question: {
+              select: {
+                id: true,
+                title: true,
+                question: true,
+                type: true,
+                content: true,
+                explanation: true,
+                points: true,
+                order: true,
+                options: {
+                  orderBy: {
+                    order: 'asc'
+                  },
+                  select: {
+                    id: true,
+                    label: true,
+                    value: true,
+                    order: true
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -761,289 +701,35 @@ export async function completeQuizAttempt(req, res) {
     if (!attempt) {
       return res.status(404).json({
         success: false,
-        message: 'Attempt kuis tidak ditemukan.'
+        message: 'Percobaan kuis tidak ditemukan.'
       });
     }
 
-    /**
-     * Idempotent:
-     * kalau frontend mengirim complete dua kali,
-     * jangan membuat hasil berbeda.
-     */
-    if (attempt.completedAt) {
-      const questions = await prisma.question.findMany({
-        where: {
-          quizId: attempt.quizId
-        },
-        select: {
-          id: true,
-          points: true,
-          explanation: true,
-          answer: true
-        }
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: 'Attempt sudah diselesaikan sebelumnya.',
-        data: {
-          attempt: getAttemptResult(
-            attempt,
-            attempt.quiz,
-            questions
-          )
-        }
-      });
-    }
-
-    /**
-     * Ambil semua pertanyaan untuk menentukan max score.
-     */
-    const questions = await prisma.question.findMany({
-      where: {
-        quizId: attempt.quizId
-      },
-      orderBy: {
-        order: 'asc'
-      },
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        question: true,
-        content: true,
-        answer: true,
-        explanation: true,
-        points: true,
-        order: true,
-        options: {
-          orderBy: {
-            order: 'asc'
-          },
-          select: {
-            id: true,
-            label: true,
-            value: true,
-            isCorrect: true,
-            order: true
-          }
-        }
-      }
-    });
-
-    if (!questions.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'Kuis tidak memiliki pertanyaan.'
-      });
-    }
-
-    /**
-     * Hitung ulang seluruh jawaban di server.
-     *
-     * Jangan mempercayai score dari frontend.
-     */
-    const questionMap = new Map(
-      questions.map(question => [
-        question.id,
-        question
-      ])
-    );
-
-    let score = 0;
-
-    const evaluatedAnswers = attempt.answers.map(answer => {
-      const question =
-        questionMap.get(answer.questionId);
-
-      if (!question) {
-        return {
-          ...answer,
-          correct: false,
-          pointsAwarded: 0
-        };
-      }
-
-      const correctAnswer =
-        extractCorrectAnswer(question);
-
-      const correct =
-        correctAnswer !== null &&
-        answersMatch(
-          answer.answer,
-          correctAnswer
-        );
-
-      const pointsAwarded =
-        correct
-          ? Math.max(0, question.points || 0)
-          : 0;
-
-      score += pointsAwarded;
-
-      return {
-        ...answer,
-        correct,
-        pointsAwarded
-      };
-    });
-
-    /**
-     * Pertanyaan yang belum dijawab mendapatkan 0.
-     */
-    const answeredQuestionIds =
-      new Set(
-        attempt.answers.map(
-          answer => answer.questionId
-        )
-      );
-
-    for (const question of questions) {
-      if (!answeredQuestionIds.has(question.id)) {
-        evaluatedAnswers.push({
-          id: null,
-          questionId: question.id,
-          answer: null,
-          correct: false,
-          pointsAwarded: 0
-        });
-      }
-    }
-
-    const maxScore =
-      calculateMaxScore(questions);
-
-    const percentage =
-      calculatePercentage(
-        score,
-        maxScore
-      );
-
-    const passed =
-      percentage >= attempt.quiz.passingScore;
-
-    /**
-     * Update seluruh QuizAnswer sekaligus.
-     */
-    await prisma.$transaction(async transaction => {
-      for (const answer of evaluatedAnswers) {
-        if (!answer.id) {
-          continue;
-        }
-
-        await transaction.quizAnswer.update({
-          where: {
-            id: answer.id
-          },
-          data: {
-            correct: answer.correct,
-            pointsAwarded: answer.pointsAwarded
-          }
-        });
-      }
-
-      await transaction.quizAttempt.update({
-        where: {
-          id: attempt.id
-        },
-        data: {
-          score,
-          percentage,
-          passed,
-          completedAt: new Date()
-        }
-      });
-    });
-
-    /**
-     * XP dihitung dari jawaban benar.
-     */
-    const correctCount =
-      evaluatedAnswers.filter(
-        answer => answer.correct
-      ).length;
-
-    const xpEarned =
-      correctCount *
-      attempt.quiz.xpPerCorrect;
-
-    /**
-     * Feedback sederhana untuk pembelajaran adaptif.
-     */
-    let learningStatus = 'NEEDS_SUPPORT';
-
-    if (percentage >= 90) {
-      learningStatus = 'MASTERED';
-    } else if (percentage >= attempt.quiz.passingScore) {
-      learningStatus = 'DEVELOPING';
-    }
-
-    /**
-     * Explanation hanya dikirim setelah selesai,
-     * dan hanya jika konfigurasi quiz mengizinkannya.
-     */
-    const explanations =
-      attempt.quiz.showExplanation
-        ? questions.map(question => {
-            const answer =
-              evaluatedAnswers.find(
-                item =>
-                  item.questionId === question.id
-              );
-
-            return {
-              questionId: question.id,
-              explanation: question.explanation,
-              correct: answer?.correct ?? false,
-              pointsAwarded:
-                answer?.pointsAwarded ?? 0
-            };
-          })
-        : [];
+    const data = {
+      id: attempt.id,
+      userId: attempt.userId,
+      quizId: attempt.quizId,
+      score: attempt.score,
+      percentage: attempt.percentage,
+      passed: attempt.passed,
+      startedAt: attempt.startedAt,
+      completedAt: attempt.completedAt,
+      quiz: attempt.quiz,
+      answers: attempt.answers
+    };
 
     return res.status(200).json({
       success: true,
-      message: passed
-        ? 'Selamat, kamu berhasil menyelesaikan kuis.'
-        : 'Kuis selesai. Yuk pelajari kembali materi yang masih perlu diperkuat.',
-
       data: {
-        attempt: {
-          id: attempt.id,
-          quizId: attempt.quizId,
-          score,
-          maxScore,
-          percentage,
-          passed,
-          passingScore: attempt.quiz.passingScore,
-          startedAt: attempt.startedAt,
-          completedAt: new Date()
-        },
-
-        result: {
-          correctCount,
-          answeredCount: attempt.answers.length,
-          totalQuestions: questions.length,
-          xpEarned,
-          learningStatus
-        },
-
-        explanations
+        attempt: data
       }
     });
   } catch (error) {
-    console.error('completeQuizAttempt:', error);
-
-    if (error?.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Attempt tidak ditemukan.'
-      });
-    }
+    console.error('getQuizAttemptController:', error);
 
     return res.status(500).json({
       success: false,
-      message: 'Gagal menyelesaikan kuis.'
+      message: 'Gagal mengambil data percobaan kuis.'
     });
   }
 }
