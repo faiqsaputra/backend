@@ -88,35 +88,16 @@ if (isProduction && configuredOrigins.length === 0) {
 
 const corsOptions = {
   origin(origin, callback) {
-    /*
-     * Request dari:
-     * - curl
-     * - Postman
-     * - server-to-server
-     *
-     * biasanya tidak memiliki Origin.
-     */
-    if (!origin) {
+    if (!origin || allowedOrigins.has(origin)) {
       return callback(null, true);
     }
 
-    if (allowedOrigins.has(origin)) {
-      return callback(null, true);
-    }
+    console.warn(`[CORS] Origin ditolak: ${origin}`);
 
-    console.warn(
-      `[CORS] Origin ditolak: ${origin}`
-    );
-
-    /*
-     * Jangan throw error 403 dari middleware CORS.
-     *
-     * Biarkan request diproses tanpa CORS header.
-     * Browser yang akan menolak akses JavaScript
-     * terhadap response tersebut.
-     */
     return callback(null, false);
   },
+
+  credentials: true,
 
   methods: [
     'GET',
@@ -133,12 +114,12 @@ const corsOptions = {
     'Authorization'
   ],
 
-  credentials: true,
-
   optionsSuccessStatus: 204,
 
   maxAge: 86400
 };
+
+app.use(cors(corsOptions));
 
 /*
  * CORS harus dipasang sebelum seluruh route API.
