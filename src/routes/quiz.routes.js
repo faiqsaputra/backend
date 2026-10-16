@@ -1,61 +1,113 @@
 import { Router } from 'express';
 
 import {
-  listQuizzes,
-  quizStats,
-  getQuiz,
-  createQuizHandler,
-  updateQuizHandler,
-  deleteQuizHandler,
-  listQuizQuestions,
-  getQuizQuestion,
-  createQuizQuestion,
-  updateQuizQuestion,
-  deleteQuizQuestion,
-  reorderQuizQuestions,
-  previewQuizHandler,
-  validateQuizPublish,
-  publishQuizHandler,
-  unpublishQuizHandler,
-  archiveQuizHandler
-} from '../controllers/quiz.controller.js';
-
-import {
-  publicListQuizzes,
-  getPublishedQuiz
+    publicListQuizzes,
+    getPublishedQuiz,
+    startQuizAttempt,
+    submitQuizAnswer,
+    completeQuizAttempt,
+    getQuizAttempt
 } from '../controllers/public-quiz.controller.js';
 
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
+
+
+// ============================================================
+// ROUTER INITIALIZATION
+// Prefix: /api/quizzes
+// ============================================================
 
 const router = Router();
-const publicQuizRouter = Router();
 
-router.use(requireAuth, requireRole('ADMIN'));
 
-router.get('/stats', quizStats);
-router.get('/', listQuizzes);
+// ============================================================
+// PUBLIC: QUIZ CATALOG
+// ============================================================
 
-router.post('/', createQuizHandler);
-router.get('/:quizId', getQuiz);
-router.patch('/:quizId', updateQuizHandler);
-router.delete('/:quizId', deleteQuizHandler);
+// GET /api/quizzes
+// Menampilkan daftar kuis yang telah dipublikasikan.
 
-router.get('/:quizId/questions', listQuizQuestions);
-router.post('/:quizId/questions', createQuizQuestion);
-router.patch('/:quizId/questions/reorder', reorderQuizQuestions);
-router.get('/:quizId/questions/:questionId', getQuizQuestion);
-router.patch('/:quizId/questions/:questionId', updateQuizQuestion);
-router.delete('/:quizId/questions/:questionId', deleteQuizQuestion);
+router.get(
+    '/',
+    publicListQuizzes
+);
 
-router.get('/:quizId/preview', previewQuizHandler);
-router.post('/:quizId/validate-publish', validateQuizPublish);
-router.post('/:quizId/publish', publishQuizHandler);
-router.post('/:quizId/unpublish', unpublishQuizHandler);
-router.post('/:quizId/archive', archiveQuizHandler);
 
-// Public quiz routes
-publicQuizRouter.get('/', publicListQuizzes);
-publicQuizRouter.get('/:quizId', getPublishedQuiz);
+// ============================================================
+// PUBLIC: START QUIZ ATTEMPT
+// ============================================================
 
-export { publicQuizRouter };
+// POST /api/quizzes/:quizId/attempts
+// Membuat sesi pengerjaan kuis.
+// Requires authentication.
+
+router.post(
+    '/:quizId/attempts',
+    requireAuth,
+    startQuizAttempt
+);
+
+
+// ============================================================
+// PUBLIC: SUBMIT QUIZ ANSWER
+// ============================================================
+
+// POST /api/quizzes/attempts/:attemptId/answers
+// Menyimpan dan menilai jawaban pengguna.
+// Requires authentication.
+
+router.post(
+    '/attempts/:attemptId/answers',
+    requireAuth,
+    submitQuizAnswer
+);
+
+
+// ============================================================
+// PUBLIC: COMPLETE QUIZ ATTEMPT
+// ============================================================
+
+// POST /api/quizzes/attempts/:attemptId/complete
+// Menyelesaikan pengerjaan dan menghitung hasil akhir.
+// Requires authentication.
+
+router.post(
+    '/attempts/:attemptId/complete',
+    requireAuth,
+    completeQuizAttempt
+);
+
+
+// ============================================================
+// PUBLIC: GET QUIZ ATTEMPT RESULT
+// ============================================================
+
+// GET /api/quizzes/attempts/:attemptId
+// Mengambil hasil pengerjaan milik pengguna.
+// Requires authentication.
+
+router.get(
+    '/attempts/:attemptId',
+    requireAuth,
+    getQuizAttempt
+);
+
+
+// ============================================================
+// PUBLIC: PUBLISHED QUIZ DETAIL
+// ============================================================
+
+// GET /api/quizzes/:quizId
+// Menampilkan detail kuis yang telah dipublikasikan.
+
+router.get(
+    '/:quizId',
+    getPublishedQuiz
+);
+
+
+// ============================================================
+// EXPORT
+// ============================================================
+
 export default router;
