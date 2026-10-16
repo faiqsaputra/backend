@@ -22,7 +22,11 @@ import {
 
 import {
     publicListQuizzes,
-    getPublishedQuiz
+    getPublishedQuiz,
+    startQuizAttempt,
+    submitQuizAnswer,
+    completeQuizAttempt,
+    getQuizAttempt
 } from '../controllers/public-quiz.controller.js';
 
 import {
@@ -42,29 +46,21 @@ const publicQuizRouter = Router();
 // ============================================================
 // ADMIN QUIZ ROUTES
 // Prefix: /api/admin/quizzes
-// Requires: Authentication + ADMIN role
 // ============================================================
 
 router.use(requireAuth, requireRole('ADMIN'));
 
 
-// ------------------------------------------------------------
-// QUIZ MANAGEMENT
-// ------------------------------------------------------------
-
+// Quiz management
 router.get('/stats', quizStats);
 router.get('/', listQuizzes);
 router.post('/', createQuizHandler);
-
 router.get('/:quizId', getQuiz);
 router.patch('/:quizId', updateQuizHandler);
 router.delete('/:quizId', deleteQuizHandler);
 
 
-// ------------------------------------------------------------
-// QUESTION MANAGEMENT
-// ------------------------------------------------------------
-
+// Question management
 router.get('/:quizId/questions', listQuizQuestions);
 router.post('/:quizId/questions', createQuizQuestion);
 
@@ -89,22 +85,12 @@ router.delete(
 );
 
 
-// ------------------------------------------------------------
-// QUIZ PREVIEW
-// ------------------------------------------------------------
-
+// Quiz preview
 router.get('/:quizId/preview', previewQuizHandler);
 
 
-// ------------------------------------------------------------
-// QUIZ PUBLISHING
-// ------------------------------------------------------------
-
-router.post(
-    '/:quizId/validate-publish',
-    validateQuizPublish
-);
-
+// Quiz publishing
+router.post('/:quizId/validate-publish', validateQuizPublish);
 router.post('/:quizId/publish', publishQuizHandler);
 router.post('/:quizId/unpublish', unpublishQuizHandler);
 router.post('/:quizId/archive', archiveQuizHandler);
@@ -113,15 +99,45 @@ router.post('/:quizId/archive', archiveQuizHandler);
 // ============================================================
 // PUBLIC QUIZ ROUTES
 // Prefix: /api/quizzes
-// Public access is controlled by the corresponding controllers.
 // ============================================================
 
+// Daftar kuis yang dipublikasikan
 publicQuizRouter.get('/', publicListQuizzes);
+
+// Memulai pengerjaan kuis
+publicQuizRouter.post(
+    '/:quizId/attempts',
+    requireAuth,
+    startQuizAttempt
+);
+
+// Menyimpan jawaban
+publicQuizRouter.post(
+    '/attempts/:attemptId/answers',
+    requireAuth,
+    submitQuizAnswer
+);
+
+// Menyelesaikan pengerjaan kuis
+publicQuizRouter.post(
+    '/attempts/:attemptId/complete',
+    requireAuth,
+    completeQuizAttempt
+);
+
+// Melihat hasil pengerjaan
+publicQuizRouter.get(
+    '/attempts/:attemptId',
+    requireAuth,
+    getQuizAttempt
+);
+
+// Detail kuis yang sudah dipublikasikan
 publicQuizRouter.get('/:quizId', getPublishedQuiz);
 
 
 // ============================================================
-// EXPORT ROUTERS
+// EXPORT
 // ============================================================
 
 export { publicQuizRouter };
