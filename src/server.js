@@ -75,25 +75,35 @@ console.log(
   [...allowedOrigins]
 );
 
-if (isProduction && configuredOrigins.length === 0) {
-  console.warn(
-    '[CORS] CORS_ORIGINS belum dikonfigurasi. ' +
-    'Menggunakan default production origin.'
-  );
-}
-
 /* =========================================================
-   CORS MIDDLEWARE
+   CORS CONFIGURATION
 ========================================================= */
 
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) {
+    /*
+     * Request tanpa Origin:
+     * curl, Postman, server-to-server, dsb.
+     */
+    if (!origin) {
       return callback(null, true);
     }
 
-    console.warn(`[CORS] Origin ditolak: ${origin}`);
+    /*
+     * Browser dari origin yang diizinkan.
+     */
+    if (allowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
 
+    console.warn(
+      `[CORS] Origin ditolak: ${origin}`
+    );
+
+    /*
+     * Jangan throw 403 dari middleware CORS.
+     * CORS bukan authentication layer.
+     */
     return callback(null, false);
   },
 
@@ -121,32 +131,17 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-/*
- * CORS harus dipasang sebelum seluruh route API.
- */
-app.use(cors(corsOptions));
-
-/*
- * Explicit preflight handler.
- *
- * Membantu request POST/PUT/PATCH/DELETE
- * yang menggunakan Authorization atau Content-Type.
- */
-app.options('*', cors(corsOptions));
-
 /* =========================================================
    SECURITY
 ========================================================= */
 
 app.disable('x-powered-by');
 
-app.use(
-  helmet()
-);
-
 if (isProduction) {
   app.set('trust proxy', 1);
 }
+
+app.use(helmet());
 
 /* =========================================================
    BODY PARSER
@@ -171,11 +166,8 @@ app.use(
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-
   limit: 120,
-
   standardHeaders: 'draft-8',
-
   legacyHeaders: false,
 
   message: {
@@ -187,11 +179,8 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-
   limit: 30,
-
   standardHeaders: 'draft-8',
-
   legacyHeaders: false,
 
   message: {
@@ -276,18 +265,12 @@ app.use(
    QUIZ
 ========================================================= */
 
-/*
- * Admin quiz
- */
 app.use(
   '/api/admin/quizzes',
   apiLimiter,
   quizRouter
 );
 
-/*
- * Public quiz
- */
 app.use(
   '/api/quizzes',
   apiLimiter,
@@ -325,9 +308,7 @@ app.use((error, _req, res, next) => {
     return next(error);
   }
 
-  /* -------------------------------------------------------
-     JSON PARSING ERROR
-  ------------------------------------------------------- */
+  /* JSON parsing */
 
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({
@@ -337,9 +318,7 @@ app.use((error, _req, res, next) => {
     });
   }
 
-  /* -------------------------------------------------------
-     PAYLOAD TOO LARGE
-  ------------------------------------------------------- */
+  /* Request terlalu besar */
 
   if (error.type === 'entity.too.large') {
     return res.status(413).json({
@@ -349,9 +328,7 @@ app.use((error, _req, res, next) => {
     });
   }
 
-  /* -------------------------------------------------------
-     PRISMA ERRORS
-  ------------------------------------------------------- */
+  /* Prisma */
 
   if (error.code === 'P2002') {
     return res.status(409).json({
@@ -377,9 +354,7 @@ app.use((error, _req, res, next) => {
     });
   }
 
-  /* -------------------------------------------------------
-     HTTP STATUS
-  ------------------------------------------------------- */
+  /* HTTP status */
 
   const candidateStatus =
     Number.isInteger(error.statusCode)
@@ -393,9 +368,7 @@ app.use((error, _req, res, next) => {
       ? candidateStatus
       : 500;
 
-  /* -------------------------------------------------------
-     SERVER ERROR LOGGING
-  ------------------------------------------------------- */
+  /* Server logging */
 
   if (statusCode >= 500) {
     console.error(
@@ -409,21 +382,13 @@ app.use((error, _req, res, next) => {
     );
   }
 
-  /* -------------------------------------------------------
-     RESPONSE MESSAGE
-  ------------------------------------------------------- */
+  /* Response message */
 
-  let message =
-    error.message ||
-    'Request gagal diproses.';
-
-  if (statusCode >= 500) {
-    message = 'Internal server error';
-  }
-
-  /* -------------------------------------------------------
-     RESPONSE
-  ------------------------------------------------------- */
+  const message =
+    statusCode >= 500
+      ? 'Internal server error'
+      : error.message ||
+        'Request gagal diproses.';
 
   return res.status(statusCode).json({
     success: false,
@@ -432,7 +397,7 @@ app.use((error, _req, res, next) => {
 });
 
 /* =========================================================
-   LOCAL SERVER
+   LOCAL DEVELOPMENT
 ========================================================= */
 
 if (!process.env.VERCEL) {
