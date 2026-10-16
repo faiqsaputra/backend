@@ -1,262 +1,243 @@
 import { Router } from 'express';
 
 import {
-  listQuizzes,
-  quizStats,
-  getQuiz,
-  createQuizHandler,
-  updateQuizHandler,
-  deleteQuizHandler,
-  listQuizQuestions,
-  getQuizQuestion,
-  createQuizQuestion,
-  updateQuizQuestion,
-  deleteQuizQuestion,
-  reorderQuizQuestions,
-  previewQuizHandler,
-  validateQuizPublish,
-  publishQuizHandler,
-  unpublishQuizHandler,
-  archiveQuizHandler
+    listQuizzes,
+    quizStats,
+    getQuiz,
+    createQuizHandler,
+    updateQuizHandler,
+    deleteQuizHandler,
+    listQuizQuestions,
+    getQuizQuestion,
+    createQuizQuestion,
+    updateQuizQuestion,
+    deleteQuizQuestion,
+    reorderQuizQuestions,
+    previewQuizHandler,
+    validateQuizPublish,
+    publishQuizHandler,
+    unpublishQuizHandler,
+    archiveQuizHandler
 } from '../controllers/quiz.controller.js';
 
 import {
-  publicListQuizzes,
-  getPublishedQuiz
+    publicListQuizzes,
+    getPublishedQuiz
 } from '../controllers/public-quiz.controller.js';
 
 import {
-  startQuizAttempt,
-  submitQuizAnswer,
-  completeQuizAttempt,
-  getQuizAttempt
+    startQuizAttempt,
+    submitQuizAnswer,
+    completeQuizAttempt,
+    getQuizAttempt
 } from '../controllers/quiz-attempt.controller.js';
 
 import {
-  requireAuth,
-  requireRole
+    requireAuth,
+    requireRole
 } from '../middleware/auth.js';
 
-const router = Router();
+
+// ============================================================
+// ROUTER INITIALIZATION
+// ============================================================
+
+const adminQuizRouter = Router();
 const publicQuizRouter = Router();
 
 
 // ============================================================
-// ADMIN QUIZ ROUTES
+// ADMIN MIDDLEWARE
 // Prefix: /api/admin/quizzes
-// Semua endpoint admin membutuhkan autentikasi + role ADMIN.
+//
+// Semua endpoint ADMIN wajib menggunakan autentikasi
+// dan memiliki role ADMIN.
 // ============================================================
 
-router.use(
-  requireAuth,
-  requireRole('ADMIN')
-);
-
-
-// ============================================================
-// QUIZ MANAGEMENT
-// ============================================================
-
-router.get(
-  '/stats',
-  quizStats
-);
-
-router.get(
-  '/',
-  listQuizzes
-);
-
-router.post(
-  '/',
-  createQuizHandler
-);
-
-router.get(
-  '/:quizId',
-  getQuiz
-);
-
-router.patch(
-  '/:quizId',
-  updateQuizHandler
-);
-
-router.delete(
-  '/:quizId',
-  deleteQuizHandler
-);
+adminQuizRouter.use(requireAuth, requireRole('ADMIN'));
 
 
 // ============================================================
-// QUESTION MANAGEMENT
+// ADMIN: QUIZ STATISTICS
 // ============================================================
 
-router.get(
-  '/:quizId/questions',
-  listQuizQuestions
+// GET /api/admin/quizzes/stats
+adminQuizRouter.get('/stats', quizStats);
+
+
+// ============================================================
+// ADMIN: QUIZ MANAGEMENT
+// ============================================================
+
+// GET  /api/admin/quizzes
+// POST /api/admin/quizzes
+
+adminQuizRouter.get('/', listQuizzes);
+adminQuizRouter.post('/', createQuizHandler);
+
+
+// ============================================================
+// ADMIN: QUESTION MANAGEMENT
+// ============================================================
+
+// GET  /api/admin/quizzes/:quizId/questions
+// POST /api/admin/quizzes/:quizId/questions
+
+adminQuizRouter.get('/:quizId/questions', listQuizQuestions);
+adminQuizRouter.post('/:quizId/questions', createQuizQuestion);
+
+
+// PATCH /api/admin/quizzes/:quizId/questions/reorder
+adminQuizRouter.patch('/:quizId/questions/reorder', reorderQuizQuestions);
+
+
+// GET    /api/admin/quizzes/:quizId/questions/:questionId
+// PATCH  /api/admin/quizzes/:quizId/questions/:questionId
+// DELETE /api/admin/quizzes/:quizId/questions/:questionId
+
+adminQuizRouter.get(
+    '/:quizId/questions/:questionId',
+    getQuizQuestion
 );
 
-router.post(
-  '/:quizId/questions',
-  createQuizQuestion
+adminQuizRouter.patch(
+    '/:quizId/questions/:questionId',
+    updateQuizQuestion
 );
 
-router.patch(
-  '/:quizId/questions/reorder',
-  reorderQuizQuestions
-);
-
-router.get(
-  '/:quizId/questions/:questionId',
-  getQuizQuestion
-);
-
-router.patch(
-  '/:quizId/questions/:questionId',
-  updateQuizQuestion
-);
-
-router.delete(
-  '/:quizId/questions/:questionId',
-  deleteQuizQuestion
+adminQuizRouter.delete(
+    '/:quizId/questions/:questionId',
+    deleteQuizQuestion
 );
 
 
 // ============================================================
-// QUIZ PREVIEW
+// ADMIN: QUIZ PREVIEW
 // ============================================================
 
-router.get(
-  '/:quizId/preview',
-  previewQuizHandler
-);
+// GET /api/admin/quizzes/:quizId/preview
+adminQuizRouter.get('/:quizId/preview', previewQuizHandler);
 
 
 // ============================================================
-// QUIZ PUBLISHING
+// ADMIN: QUIZ PUBLISHING
 // ============================================================
 
-router.post(
-  '/:quizId/validate-publish',
-  validateQuizPublish
+// POST /api/admin/quizzes/:quizId/validate-publish
+adminQuizRouter.post(
+    '/:quizId/validate-publish',
+    validateQuizPublish
 );
 
-router.post(
-  '/:quizId/publish',
-  publishQuizHandler
-);
+// POST /api/admin/quizzes/:quizId/publish
+adminQuizRouter.post('/:quizId/publish', publishQuizHandler);
 
-router.post(
-  '/:quizId/unpublish',
-  unpublishQuizHandler
-);
+// POST /api/admin/quizzes/:quizId/unpublish
+adminQuizRouter.post('/:quizId/unpublish', unpublishQuizHandler);
 
-router.post(
-  '/:quizId/archive',
-  archiveQuizHandler
-);
+// POST /api/admin/quizzes/:quizId/archive
+adminQuizRouter.post('/:quizId/archive', archiveQuizHandler);
 
 
 // ============================================================
-// PUBLIC QUIZ ROUTES
+// ADMIN: QUIZ DETAIL
+// ============================================================
+
+// GET    /api/admin/quizzes/:quizId
+// PATCH  /api/admin/quizzes/:quizId
+// DELETE /api/admin/quizzes/:quizId
+
+adminQuizRouter.get('/:quizId', getQuiz);
+adminQuizRouter.patch('/:quizId', updateQuizHandler);
+adminQuizRouter.delete('/:quizId', deleteQuizHandler);
+
+
+// ============================================================
+// PUBLIC: QUIZ CATALOG
 // Prefix: /api/quizzes
 //
-// GET quiz dapat diakses tanpa login.
-// Endpoint pengerjaan quiz membutuhkan requireAuth.
+// Pengguna dapat melihat kuis yang sudah dipublikasikan
+// tanpa harus login.
 // ============================================================
 
-
-// ============================================================
-// PUBLIC QUIZ LIST
 // GET /api/quizzes
-// ============================================================
-
-publicQuizRouter.get(
-  '/',
-  publicListQuizzes
-);
+publicQuizRouter.get('/', publicListQuizzes);
 
 
 // ============================================================
-// QUIZ ATTEMPT
+// PUBLIC: START QUIZ ATTEMPT
 // ============================================================
 
-
-// ------------------------------------------------------------
-// START ATTEMPT
 // POST /api/quizzes/:quizId/attempts
-// ------------------------------------------------------------
+// Membutuhkan autentikasi.
 
 publicQuizRouter.post(
-  '/:quizId/attempts',
-  requireAuth,
-  startQuizAttempt
+    '/:quizId/attempts',
+    requireAuth,
+    startQuizAttempt
 );
 
 
-// ------------------------------------------------------------
-// SUBMIT ANSWER
+// ============================================================
+// PUBLIC: SUBMIT ANSWER
+// ============================================================
+
 // POST /api/quizzes/attempts/:attemptId/answers
-//
 // Body:
 // {
-//   "questionId": "question_id",
-//   "answer": "A"
+//     "questionId": "question_id",
+//     "answer": "A"
 // }
-// ------------------------------------------------------------
 
 publicQuizRouter.post(
-  '/attempts/:attemptId/answers',
-  requireAuth,
-  submitQuizAnswer
+    '/attempts/:attemptId/answers',
+    requireAuth,
+    submitQuizAnswer
 );
 
 
-// ------------------------------------------------------------
-// COMPLETE ATTEMPT
+// ============================================================
+// PUBLIC: COMPLETE QUIZ ATTEMPT
+// ============================================================
+
 // POST /api/quizzes/attempts/:attemptId/complete
-// ------------------------------------------------------------
 
 publicQuizRouter.post(
-  '/attempts/:attemptId/complete',
-  requireAuth,
-  completeQuizAttempt
+    '/attempts/:attemptId/complete',
+    requireAuth,
+    completeQuizAttempt
 );
 
 
-// ------------------------------------------------------------
-// GET ATTEMPT RESULT
+// ============================================================
+// PUBLIC: GET QUIZ ATTEMPT RESULT
+// ============================================================
+
 // GET /api/quizzes/attempts/:attemptId
-// ------------------------------------------------------------
 
 publicQuizRouter.get(
-  '/attempts/:attemptId',
-  requireAuth,
-  getQuizAttempt
+    '/attempts/:attemptId',
+    requireAuth,
+    getQuizAttempt
 );
 
 
 // ============================================================
-// PUBLISHED QUIZ DETAIL
+// PUBLIC: PUBLISHED QUIZ DETAIL
+// ============================================================
+
 // GET /api/quizzes/:quizId
-//
-// Route ini diletakkan setelah seluruh route /attempts/*
-// agar struktur endpoint tetap jelas.
-// ============================================================
+// Hanya boleh mengembalikan kuis yang sudah dipublikasikan.
 
-publicQuizRouter.get(
-  '/:quizId',
-  getPublishedQuiz
-);
+publicQuizRouter.get('/:quizId', getPublishedQuiz);
 
 
 // ============================================================
-// EXPORT
+// EXPORT ROUTERS
 // ============================================================
 
-export {
-  publicQuizRouter
-};
+// Default export digunakan untuk ADMIN routes.
+export default adminQuizRouter;
 
-export default router;
+// Named export digunakan untuk PUBLIC routes.
+export { publicQuizRouter };
