@@ -18,11 +18,23 @@ import cycleRoutes from './routes/cycle.routes.js';
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
+/* =========================================================
+   ENVIRONMENT
+========================================================= */
+
 const isProduction =
   process.env.NODE_ENV === 'production' ||
   Boolean(process.env.VERCEL);
 
+/* =========================================================
+   CORS
+========================================================= */
+
 function normalizeOrigin(value) {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+
   try {
     const url = new URL(value.trim());
 
@@ -38,63 +50,52 @@ function normalizeOrigin(value) {
 
 const configuredOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
-  .map(origin => normalizeOrigin(origin))
+  .map(normalizeOrigin)
   .filter(Boolean);
+
+const defaultProductionOrigins = [
+  'https://frontend-nisabot.vercel.app'
+];
 
 const developmentOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173'
 ];
 
-const allowedOrigins = new Set(
-  configuredOrigins.length
-    ? configuredOrigins
-    : isProduction
-      ? []
-      : developmentOrigins
+const allowedOrigins = new Set([
+  ...(isProduction
+    ? defaultProductionOrigins
+    : developmentOrigins),
+
+  ...configuredOrigins
+]);
+
+console.log(
+  '[CORS] Allowed origins:',
+  [...allowedOrigins]
 );
 
-if (isProduction && allowedOrigins.size === 0) {
+if (isProduction && configuredOrigins.length === 0) {
   console.warn(
     '[CORS] CORS_ORIGINS belum dikonfigurasi. ' +
-    'Request browser dari origin lain akan ditolak.'
+    'Menggunakan default production origin.'
   );
 }
 
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 120,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: {
-    success: false,
-    message: 'Terlalu banyak request. Silakan coba lagi nanti.'
-  }
-});
+/* =========================================================
+   CORS MIDDLEWARE
+========================================================= */
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 30,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: {
-    success: false,
-    message: 'Terlalu banyak percobaan autentikasi. Silakan coba lagi nanti.'
-  }
-});
-
-app.disable('x-powered-by');
-
-if (isProduction) {
-  app.set('trust proxy', 1);
-}
-
-app.use(helmet());
-
-app.use(cors({
+const corsOptions = {
   origin(origin, callback) {
-    // Request server-to-server dan tools seperti curl tidak selalu
-    // mengirim header Origin.
+    /*
+     * Request dari:
+     * - curl
+     * - Postman
+     * - server-to-server
+     *
+     * biasanya tidak memiliki Origin.
+     */
     if (!origin) {
       return callback(null, true);
     }
@@ -103,24 +104,126 @@ app.use(cors({
       return callback(null, true);
     }
 
-    const error = new Error('Origin not allowed by CORS');
-    error.statusCode = 403;
+    console.warn(
+      `[CORS] Origin ditolak: ${origin}`
+    );
 
-    return callback(error);
+    /*
+     * Jangan throw error 403 dari middleware CORS.
+     *
+     * Biarkan request diproses tanpa CORS header.
+     * Browser yang akan menolak akses JavaScript
+     * terhadap response tersebut.
+     */
+    return callback(null, false);
   },
-  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 204
-}));
 
-app.use(express.json({ limit: '1mb' }));
+  methods: [
+    'GET',
+    'HEAD',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS'
+  ],
 
-app.use(express.urlencoded({
-  extended: false,
-  limit: '1mb'
-}));
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization'
+  ],
 
-// Health check — tidak melakukan query database.
+  credentials: true,
+
+  optionsSuccessStatus: 204,
+
+  maxAge: 86400
+};
+
+/*
+ * CORS harus dipasang sebelum seluruh route API.
+ */
+app.use(cors(corsOptions));
+
+/*
+ * Explicit preflight handler.
+ *
+ * Membantu request POST/PUT/PATCH/DELETE
+ * yang menggunakan Authorization atau Content-Type.
+ */
+app.options('*', cors(corsOptions));
+
+/* =========================================================
+   SECURITY
+========================================================= */
+
+app.disable('x-powered-by');
+
+app.use(
+  helmet()
+);
+
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
+
+/* =========================================================
+   BODY PARSER
+========================================================= */
+
+app.use(
+  express.json({
+    limit: '1mb'
+  })
+);
+
+app.use(
+  express.urlencoded({
+    extended: false,
+    limit: '1mb'
+  })
+);
+
+/* =========================================================
+   RATE LIMIT
+========================================================= */
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+
+  limit: 120,
+
+  standardHeaders: 'draft-8',
+
+  legacyHeaders: false,
+
+  message: {
+    success: false,
+    message:
+      'Terlalu banyak request. Silakan coba lagi nanti.'
+  }
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+
+  limit: 30,
+
+  standardHeaders: 'draft-8',
+
+  legacyHeaders: false,
+
+  message: {
+    success: false,
+    message:
+      'Terlalu banyak percobaan autentikasi. Silakan coba lagi nanti.'
+  }
+});
+
+/* =========================================================
+   HEALTH CHECK
+========================================================= */
+
 app.get('/api/health', (_req, res) => {
   return res.status(200).json({
     success: true,
@@ -129,29 +232,101 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-// Authentication
-app.use('/api/auth', apiLimiter, authLimiter, authRoutes);
+/* =========================================================
+   AUTHENTICATION
+========================================================= */
 
-// Admin dashboard
-app.use('/api/admin', apiLimiter, adminRoutes);
+app.use(
+  '/api/auth',
+  apiLimiter,
+  authLimiter,
+  authRoutes
+);
 
-// Admin content management
-app.use('/api/admin/materials', apiLimiter, materialRoutes);
-app.use('/api/admin/videos', apiLimiter, videoRoutes);
-app.use('/api/admin/videos', apiLimiter, videoChapterRoutes);
+/* =========================================================
+   ADMIN DASHBOARD
+========================================================= */
 
-// Public content
-app.use('/api/materials', apiLimiter, publicMaterialRoutes);
-app.use('/api/videos', apiLimiter, publicVideoRoutes);
+app.use(
+  '/api/admin',
+  apiLimiter,
+  adminRoutes
+);
 
-// Quiz management and public quiz
-app.use('/api/admin/quizzes', apiLimiter, quizRouter);
-app.use('/api/quizzes', apiLimiter, publicQuizRouter);
+/* =========================================================
+   ADMIN CONTENT MANAGEMENT
+========================================================= */
 
-// Menstrual cycle
-app.use('/api/cycles', apiLimiter, cycleRoutes);
+app.use(
+  '/api/admin/materials',
+  apiLimiter,
+  materialRoutes
+);
 
-// API not found
+app.use(
+  '/api/admin/videos',
+  apiLimiter,
+  videoRoutes
+);
+
+app.use(
+  '/api/admin/videos',
+  apiLimiter,
+  videoChapterRoutes
+);
+
+/* =========================================================
+   PUBLIC CONTENT
+========================================================= */
+
+app.use(
+  '/api/materials',
+  apiLimiter,
+  publicMaterialRoutes
+);
+
+app.use(
+  '/api/videos',
+  apiLimiter,
+  publicVideoRoutes
+);
+
+/* =========================================================
+   QUIZ
+========================================================= */
+
+/*
+ * Admin quiz
+ */
+app.use(
+  '/api/admin/quizzes',
+  apiLimiter,
+  quizRouter
+);
+
+/*
+ * Public quiz
+ */
+app.use(
+  '/api/quizzes',
+  apiLimiter,
+  publicQuizRouter
+);
+
+/* =========================================================
+   MENSTRUAL CYCLE
+========================================================= */
+
+app.use(
+  '/api/cycles',
+  apiLimiter,
+  cycleRoutes
+);
+
+/* =========================================================
+   API NOT FOUND
+========================================================= */
+
 app.use((req, res) => {
   return res.status(404).json({
     success: false,
@@ -160,72 +335,114 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler
+/* =========================================================
+   GLOBAL ERROR HANDLER
+========================================================= */
+
 app.use((error, _req, res, next) => {
   if (res.headersSent) {
     return next(error);
   }
 
+  /* -------------------------------------------------------
+     JSON PARSING ERROR
+  ------------------------------------------------------- */
+
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({
       success: false,
-      message: 'Format JSON request tidak valid.'
+      message:
+        'Format JSON request tidak valid.'
     });
   }
+
+  /* -------------------------------------------------------
+     PAYLOAD TOO LARGE
+  ------------------------------------------------------- */
 
   if (error.type === 'entity.too.large') {
     return res.status(413).json({
       success: false,
-      message: 'Ukuran request melebihi batas 1 MB.'
+      message:
+        'Ukuran request melebihi batas 1 MB.'
     });
   }
+
+  /* -------------------------------------------------------
+     PRISMA ERRORS
+  ------------------------------------------------------- */
 
   if (error.code === 'P2002') {
     return res.status(409).json({
       success: false,
-      message: 'Data bertentangan dengan data yang sudah ada.'
+      message:
+        'Data bertentangan dengan data yang sudah ada.'
     });
   }
 
   if (error.code === 'P2003') {
     return res.status(409).json({
       success: false,
-      message: 'Operasi ditolak karena masih memiliki relasi data.'
+      message:
+        'Operasi ditolak karena masih memiliki relasi data.'
     });
   }
 
   if (error.code === 'P2025') {
     return res.status(404).json({
       success: false,
-      message: 'Data yang diminta tidak ditemukan.'
+      message:
+        'Data yang diminta tidak ditemukan.'
     });
   }
 
-  const candidateStatus = Number.isInteger(error.statusCode)
-    ? error.statusCode
-    : error.status;
+  /* -------------------------------------------------------
+     HTTP STATUS
+  ------------------------------------------------------- */
+
+  const candidateStatus =
+    Number.isInteger(error.statusCode)
+      ? error.statusCode
+      : error.status;
 
   const statusCode =
     Number.isInteger(candidateStatus) &&
     candidateStatus >= 400 &&
-    candidateStatus < 500
+    candidateStatus < 600
       ? candidateStatus
       : 500;
 
+  /* -------------------------------------------------------
+     SERVER ERROR LOGGING
+  ------------------------------------------------------- */
+
   if (statusCode >= 500) {
-    console.error('Unhandled server error:', {
-      name: error.name,
-      message: error.message,
-      code: error.code,
-      stack: error.stack
-    });
+    console.error(
+      'Unhandled server error:',
+      {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      }
+    );
   }
 
-  const message = statusCode >= 500
-    ? 'Internal server error'
-    : statusCode === 403
-      ? 'Origin tidak diizinkan mengakses API.'
-      : error.message || 'Request gagal diproses.';
+  /* -------------------------------------------------------
+     RESPONSE MESSAGE
+  ------------------------------------------------------- */
+
+  let message =
+    error.message ||
+    'Request gagal diproses.';
+
+  if (statusCode >= 500) {
+    message = 'Internal server error';
+  }
+
+  /* -------------------------------------------------------
+     RESPONSE
+  ------------------------------------------------------- */
 
   return res.status(statusCode).json({
     success: false,
@@ -233,12 +450,20 @@ app.use((error, _req, res, next) => {
   });
 });
 
-// Vercel menggunakan default export.
-// Listener hanya dijalankan ketika server lokal digunakan.
+/* =========================================================
+   LOCAL SERVER
+========================================================= */
+
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
-    console.log(`Nusa Bot API berjalan di http://localhost:${PORT}`);
+    console.log(
+      `Nusa Bot API berjalan di http://localhost:${PORT}`
+    );
   });
 }
+
+/* =========================================================
+   VERCEL
+========================================================= */
 
 export default app;
